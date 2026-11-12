@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tank Turn Tactics</title>
+<style>
+  :root { --bg:#14171c; --panel:#1d222a; --line:#2c333d; --text:#e6e9ee; --muted:#8a94a3; --accent:#4fd1a5; --bad:#ff6b6b; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.4 system-ui,sans-serif; }
+  #app { display:flex; flex-wrap:wrap; gap:16px; padding:16px; max-width:1100px; margin:0 auto; }
+  #boardWrap { flex:1 1 480px; min-width:300px; }
+  aside { flex:1 1 300px; display:flex; flex-direction:column; gap:12px; min-width:260px; }
+  section { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:12px; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  h2 { font-size:13px; margin:0 0 8px; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; }
+  #banner { margin-bottom:10px; color:var(--muted); }
+  #board { display:grid; grid-template-columns:repeat(16,1fr); gap:1px; background:var(--line); border:1px solid var(--line); aspect-ratio:1; width:100%; }
+  .cell { background:#191d24; position:relative; min-width:0; min-height:0; }
+  .cell.inrange { background:#1f2d2a; }
+  .cell.me { outline:2px solid var(--accent); outline-offset:-2px; z-index:1; }
+  .cell.sel { outline:2px solid #ffd166; outline-offset:-2px; z-index:1; }
+  .tank { position:absolute; inset:12%; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:clamp(7px,1.6vw,13px); font-weight:700; color:#0b0d10; cursor:default; }
+  .cell.inrange .tank { cursor:pointer; }
+  .hp { position:absolute; bottom:1px; left:0; right:0; display:flex; justify-content:center; gap:1px; }
+  .pip { width:4px; height:4px; background:var(--bad); border-radius:50%; }
+  .stats { display:flex; gap:16px; margin-bottom:10px; }
+  .stat b { display:block; font-size:22px; }
+  .stat span { color:var(--muted); font-size:12px; }
+  .row { display:flex; gap:6px; flex-wrap:wrap; align-items:center; margin-top:6px; }
+  button { background:#2a323d; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 10px; cursor:pointer; font:inherit; }
+  button:hover:not(:disabled) { background:#343e4b; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--accent); color:#06231a; border-color:var(--accent); font-weight:600; }
+  input { background:#12151a; color:var(--text); border:1px solid var(--line); border-radius:6px; padding:6px 8px; font:inherit; width:100%; }
+  input[type=number] { width:64px; }
+  #dpad { display:grid; grid-template-columns:repeat(3,36px); grid-template-rows:repeat(2,32px); gap:4px; }
+  #dpad button { padding:0; }
+  #msg { min-height:18px; margin-top:8px; color:var(--bad); font-size:13px; }
+  table { width:100%; border-collapse:collapse; }
+  td, th { text-align:left; padding:3px 4px; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  tr.dead td { color:var(--muted); text-decoration:line-through; }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+  #log { max-height:200px; overflow:auto; font-size:13px; }
+  #log div { padding:2px 0; border-bottom:1px solid var(--line); }
+  #whoBar { display:flex; justify-content:space-between; align-items:center; gap:8px; color:var(--muted); font-size:13px; }
+  #whoEmail { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #authBox input + input { margin-top:6px; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="boardWrap">
+    <h1>Tank Turn Tactics</h1>
+    <div id="banner">Connecting…</div>
+    <div id="board"></div>
+  </div>
+
+  <aside>
+    <section id="whoBar" hidden>
+      <span>Signed in as <b id="whoEmail"></b></span>
+      <button id="signOutBtn">Sign out</button>
+    </section>
+
+    <section id="authBox" hidden>
+      <h2>Sign in</h2>
+      <input id="emailInput" type="email" placeholder="Email" autocomplete="username" autocapitalize="none">
+      <input id="passInput" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
+      <div class="row">
+        <button class="primary" id="signInBtn">Sign in</button>
+        <button id="signUpBtn">Create account</button>
+        <button id="resetBtn">Forgot password</button>
+      </div>
+      <div id="authMsg" style="font-size:13px;margin-top:6px"></div>
+    </section>
+
+    <section id="joinBox" hidden>
+      <h2>Join the game</h2>
+      <input id="nameInput" maxlength="20" placeholder="Your name">
+      <div class="row"><button class="primary" id="joinBtn">Join</button></div>
+      <div id="joinMsg" style="color:var(--bad);font-size:13px;margin-top:6px"></div>
+    </section>
+
+    <section id="meBox" hidden>
+      <h2>You</h2>
+      <div class="stats">
+        <div class="stat"><b id="sHp">-</b><span>HP</span></div>
+        <div class="stat"><b id="sAp">-</b><span>Action points</span></div>
+        <div class="stat"><b id="sRange">-</b><span>Range</span></div>
+      </div>
+      <div class="row">
+        <div id="dpad">
+          <span></span><button data-m="0,-1" title="Up">▲</button><span></span>
+          <button data-m="-1,0" title="Left">◀</button><button data-m="0,1" title="Down">▼</button><button data-m="1,0" title="Right">▶</button>
+        </div>
+        <button id="rangeBtn">Range +1 (2 AP)</button>
+      </div>
+      <div class="row">
+        <span id="selLabel" style="color:var(--muted)">Click a tank in range to target it</span>
+      </div>
+      <div class="row">
+        <button id="attackBtn" disabled>Attack (1 AP)</button>
+        <input type="number" id="giveAmt" min="1" value="1">
+        <button id="giveBtn" disabled>Give AP</button>
+      </div>
+      <div id="msg"></div>
+    </section>
+
+    <section>
+      <h2>Players</h2>
+      <table>
+        <thead><tr><th>Name</th><th>HP</th><th>Range</th></tr></thead>
+        <tbody id="players"></tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Event log</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, collection, doc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { GRID, DAY, dist, apOf, replay, check } from "./engine.js";
+
+// ====== PASTE YOUR FIREBASE WEB CONFIG HERE (Project settings → Your apps → Web app) ======
+const firebaseConfig = {
+  apiKey: "AIzaSyBZX1mATHH3kJnUtFwt16ch62VWB7R94qE",
+  authDomain: "alliance-prototype.firebaseapp.com",
+  projectId: "alliance-prototype",
+  storageBucket: "alliance-prototype.firebasestorage.app",
+  messagingSenderId: "1060860489170",
+  appId: "1:1060860489170:web:77026c88a7dccbb07cec0b"
+};
+// =========================================================================================
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+const $ = (id) => document.getElementById(id);
+let uid = null, startAt = null, actions = [], state = { players: new Map(), log: [] }, selected = null, listening = false;
+let unsubs = [];
+// Keep players signed in across visits (until they press Sign out).
+const persistReady = setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+// ---- build the board once
+const cells = [];
+for (let i = 0; i < GRID * GRID; i++) {
+  const c = document.createElement("div");
+  c.className = "cell";
+  c.dataset.x = i % GRID; c.dataset.y = Math.floor(i / GRID);
+  c.addEventListener("click", () => onCellClick(+c.dataset.x, +c.dataset.y));
+  $("board").appendChild(c); cells.push(c);
+}
+
+const colorOf = (id) => {
+  let h = 0; for (const ch of id) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `hsl(${h} 65% 62%)`;
+};
+const me = () => state.players.get(uid);
+const fmt = (ms) => { const m = Math.max(0, Math.ceil(ms / 60000)); return `${Math.floor(m / 60)}h ${m % 60}m`; };
+
+function onCellClick(x, y) {
+  for (const [id, p] of state.players) {
+    if (p.alive && p.x === x && p.y === y && id !== uid) {
+      const m = me();
+      if (m && m.alive && dist(m, p) <= m.range) { selected = id; render(); }
+      return;
+    }
+  }
+}
+
+function recompute() {
+  actions.sort((a, b) => (a.ts - b.ts) || (a.id < b.id ? -1 : 1));
+  state = replay(actions, startAt);
+  render();
+}
+
+function render() {
+  const now = Date.now();
+  const players = state.players;
+  const m = me();
+  const started = startAt != null && now >= startAt;
+  const alive = [...players.values()].filter((p) => p.alive);
+  const over = started && players.size > 1 && alive.length === 1;
+
+  let banner;
+  if (!uid) banner = "Sign in to see the game and play.";
+  else if (startAt == null) banner = "Lobby: waiting for the game to start.";
+  else if (!started) banner = `Game starts ${new Date(startAt).toLocaleString()}. Joining is open until then.`;
+  else if (over) banner = `${alive[0].name} wins!`;
+  else if (m && !m.alive) banner = "You've been eliminated.";
+  else banner = `Game in progress. Next action point in ${fmt(startAt + (Math.floor((now - startAt) / DAY) + 1) * DAY - now)}.`;
+  $("banner").textContent = banner;
+
+  $("joinBox").hidden = !!m || !uid || started;
+  $("meBox").hidden = !m;
+
+  // board
+  const at = new Map();
+  for (const [id, p] of players) if (p.alive) at.set(`${p.x},${p.y}`, [id, p]);
+  for (const c of cells) {
+    const x = +c.dataset.x, y = +c.dataset.y;
+    const hit = at.get(`${x},${y}`);
+    c.replaceChildren();
+    const inRange = m && m.alive && dist(m, { x, y }) <= m.range && !(m.x === x && m.y === y);
+    c.className = "cell" + (inRange ? " inrange" : "");
+    if (hit) {
+      const [id, p] = hit;
+      if (id === uid) c.classList.add("me");
+      if (id === selected) c.classList.add("sel");
+      const t = document.createElement("div");
+      t.className = "tank"; t.style.background = colorOf(id);
+      t.textContent = p.name.slice(0, 2); t.title = `${p.name} · ${p.hp} HP · range ${p.range}`;
+      c.appendChild(t);
+      const hp = document.createElement("div"); hp.className = "hp";
+      for (let i = 0; i < p.hp; i++) { const pip = document.createElement("span"); pip.className = "pip"; hp.appendChild(pip); }
+      c.appendChild(hp);
+    }
+  }
+
+  // selection
+  const sel = selected && players.get(selected);
+  const selOk = sel && sel.alive && m && m.alive && dist(m, sel) <= m.range;
+  if (!selOk) selected = null;
+  $("selLabel").textContent = selected ? `Target: ${sel.name}` : "Click a tank in range to target it";
+
+  // my stats + buttons
+  const ap = m ? apOf(m, now, startAt) : 0;
+  const running = started && !over && m && m.alive;
+  if (m) { $("sHp").textContent = m.hp; $("sRange").textContent = m.range; $("sAp").textContent = ap; }
+  $("attackBtn").disabled = !(running && selected && ap >= 1);
+  $("giveBtn").disabled = !(running && selected && ap >= 1);
+  $("rangeBtn").disabled = !(running && ap >= 2);
+  document.querySelectorAll("#dpad button").forEach((b) => (b.disabled = !(running && ap >= 1)));
+
+  // player table
+  const list = [...players.entries()].sort((a, b) => (b[1].alive - a[1].alive) || (b[1].hp - a[1].hp));
+  $("players").replaceChildren(...list.map(([id, p]) => {
+    const tr = document.createElement("tr"); if (!p.alive) tr.className = "dead";
+    const td1 = document.createElement("td");
+    const dot = document.createElement("span"); dot.className = "dot"; dot.style.background = colorOf(id);
+    td1.append(dot, p.name + (id === uid ? " (you)" : ""));
+    const td2 = document.createElement("td"); td2.textContent = p.hp;
+    const td3 = document.createElement("td"); td3.textContent = p.range;
+    tr.append(td1, td2, td3); return tr;
+  }));
+
+  // event log (newest first)
+  $("log").replaceChildren(...state.log.slice(-30).reverse().map((t) => {
+    const el = document.createElement("div"); el.textContent = t; return el;
+  }));
+}
+
+// Send an action. We check it locally first so the player gets a clear error;
+// everyone's engine re-checks it anyway.
+async function send(payload, errBox = "msg") {
+  $(errBox).textContent = "";
+  const err = check(actions, startAt, { uid, ...payload, ts: Date.now() });
+  if (err) { $(errBox).textContent = err; return; }
+  try { await addDoc(collection(db, "actions"), { uid, ...payload, ts: serverTimestamp() }); }
+  catch (e) { $(errBox).textContent = e.message; }
+}
+
+$("joinBtn").onclick = () => send({ type: "join", name: $("nameInput").value.trim() }, "joinMsg");
+document.querySelectorAll("#dpad button").forEach((b) => {
+  b.onclick = () => { const [dx, dy] = b.dataset.m.split(",").map(Number); send({ type: "move", dx, dy }); };
+});
+$("rangeBtn").onclick = () => send({ type: "range" });
+$("attackBtn").onclick = () => send({ type: "attack", target: selected });
+$("giveBtn").onclick = () => send({ type: "give", target: selected, amount: Math.floor(+$("giveAmt").value) });
+
+const keys = { ArrowUp: "0,-1", ArrowDown: "0,1", ArrowLeft: "-1,0", ArrowRight: "1,0" };
+addEventListener("keydown", (e) => {
+  if (e.target.tagName === "INPUT" || !keys[e.key]) return;
+  e.preventDefault();
+  const [dx, dy] = keys[e.key].split(",").map(Number);
+  send({ type: "move", dx, dy });
+});
+
+// ---- accounts
+const AUTH_ERRORS = {
+  "auth/invalid-credential": "Wrong email or password.",
+  "auth/invalid-email": "That email address doesn't look right.",
+  "auth/missing-email": "Enter your email address.",
+  "auth/missing-password": "Enter a password.",
+  "auth/email-already-in-use": "That email already has an account. Try Sign in.",
+  "auth/weak-password": "Password must be at least 6 characters.",
+  "auth/too-many-requests": "Too many attempts. Wait a few minutes and try again.",
+  "auth/network-request-failed": "Network problem. Check your connection.",
+  "auth/operation-not-allowed": "Email/password sign-in isn't enabled in the Firebase console yet.",
+};
+function authMsg(text, ok) {
+  $("authMsg").textContent = text;
+  $("authMsg").style.color = ok ? "var(--accent)" : "var(--bad)";
+}
+async function doAuth(fn, okText) {
+  authMsg("", true);
+  try {
+    await persistReady;
+    await fn($("emailInput").value.trim(), $("passInput").value);
+    if (okText) authMsg(okText, true);
+  } catch (e) { authMsg(AUTH_ERRORS[e.code] || e.message, false); }
+}
+$("signInBtn").onclick = () => doAuth((e, p) => signInWithEmailAndPassword(auth, e, p));
+$("signUpBtn").onclick = () => doAuth((e, p) => createUserWithEmailAndPassword(auth, e, p));
+$("resetBtn").onclick = () => doAuth((e) => sendPasswordResetEmail(auth, e), "If that email has an account, a reset link is on its way. Check spam too.");
+$("signOutBtn").onclick = () => signOut(auth);
+
+// ---- live data (only while signed in; the database rules require it)
+function listen() {
+  if (listening) return; listening = true;
+  const fail = (e) => { $("banner").textContent = "Connection problem: " + e.message; };
+  unsubs.push(onSnapshot(doc(db, "game", "main"), (s) => {
+    const v = s.exists() ? s.data().startAt : null;
+    startAt = v && v.toMillis ? v.toMillis() : null;
+    recompute();
+  }, fail));
+  unsubs.push(onSnapshot(query(collection(db, "actions"), orderBy("ts")), (s) => {
+    actions = s.docs.map((d) => {
+      const v = d.data({ serverTimestamps: "estimate" });
+      return { ...v, id: d.id, ts: v.ts.toMillis() };
+    });
+    recompute();
+  }, fail));
+}
+function stopListening() {
+  unsubs.forEach((u) => u()); unsubs = []; listening = false;
+  actions = []; startAt = null; selected = null; state = { players: new Map(), log: [] };
+}
+
+onAuthStateChanged(auth, (user) => {
+  uid = user ? user.uid : null;
+  $("authBox").hidden = !!user;
+  $("whoBar").hidden = !user;
+  if (user) { $("whoEmail").textContent = user.email; $("passInput").value = ""; listen(); }
+  else stopListening();
+  render();
+});
+setInterval(render, 30000);   // refresh countdown and new daily points
+render();
+</script>
+</body>
+</html>
