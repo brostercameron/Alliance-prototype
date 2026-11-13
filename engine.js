@@ -15,7 +15,7 @@
 // viewer (see describe), so a hit is only visible to the two players involved.
 
 // ---------- Game settings (change these to tweak the rules) ----------
-export const GRID = 16;
+export const GRID = 15;
 export const START_HP = 3;
 export const START_RANGE = 2;     // diagonals count: range 2 = 5x5 square
 export const DAILY_AP = 1;
