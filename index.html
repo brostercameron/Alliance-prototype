@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<title>Alliance</title>
+<style>
+  :root {
+    --page:#e3e8e5; --panel:#f4f6f4; --ink:#1c2824; --muted:#5b6b66; --line:#c8d1cd;
+    --feltA:#34503f; --feltB:#3d5c4b; --frame:#22302a;
+    --danger:#c4402b; --gold:#f0c24b;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+    --sans:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif;
+  }
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body { margin:0; background:var(--page); color:var(--ink); font:15px/1.45 var(--sans);
+         touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+  [hidden] { display:none !important; }
+  h1, h2, p { margin:0; }
+  h1 { font:700 24px/1.1 var(--serif); letter-spacing:-.01em; }
+  h2 { font:650 15px/1.2 var(--sans); }
+
+  /* ---------- header ---------- */
+  .top { max-width:1120px; margin:0 auto; padding:16px 16px 12px; display:flex; justify-content:space-between; align-items:flex-start; gap:12px; flex-wrap:wrap; }
+  #status { color:var(--muted); margin-top:4px; max-width:60ch; }
+  #whoBar { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:13px; max-width:100%; }
+  #whoEmail { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:200px; }
+
+  /* ---------- buttons and fields ---------- */
+  .btn { font:600 15px/1 var(--sans); min-height:46px; padding:0 16px; border-radius:10px; border:1px solid var(--ink);
+         background:var(--ink); color:#fff; cursor:pointer; }
+  .btn.danger { background:var(--danger); border-color:var(--danger); }
+  .btn.quiet { background:transparent; color:var(--ink); border-color:var(--line); }
+  .btn.small { min-height:34px; padding:0 10px; font-size:13px; }
+  .btn:disabled { opacity:.38; cursor:not-allowed; }
+  .btn:focus-visible, input:focus-visible { outline:3px solid var(--gold); outline-offset:2px; }
+  input { font:16px/1.2 var(--sans); width:100%; min-height:46px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .err { color:var(--danger); font-size:13px; min-height:18px; }
+  .okmsg { color:#2f6b4f; }
+
+  /* ---------- sign in ---------- */
+  .authWrap { max-width:420px; margin:24px auto; padding:0 16px; }
+  .authCard { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:20px; display:grid; gap:10px; }
+  .authCard p { color:var(--muted); font-size:13px; }
+
+  /* ---------- layout ---------- */
+  .game { max-width:1120px; margin:0 auto; padding:0 16px 40px; display:grid; gap:20px; grid-template-columns:minmax(0,1fr); }
+  @media (min-width:920px) { .game { grid-template-columns:minmax(0,1fr) 340px; align-items:start; } }
+
+  /* ---------- board ---------- */
+  .boardFrame { width:100%; max-width:min(100%, max(360px, calc(100vh - 150px))); }
+  .boardBox { position:relative; width:100%; padding-top:100%; border:4px solid var(--frame); border-radius:8px; background:var(--frame); overflow:hidden; box-sizing:content-box; }
+  .board { position:absolute; left:0; top:0; right:0; bottom:0; display:grid; grid-template-columns:repeat(16,1fr); grid-template-rows:repeat(16,1fr); user-select:none; -webkit-user-select:none; }
+  .cell { position:relative; background:var(--feltA); }
+  .cell.alt { background:var(--feltB); }
+  .cell.r::before { content:""; position:absolute; left:0; top:0; right:0; bottom:0; background:rgba(255,255,255,.15); pointer-events:none; }
+  .cell.r::after { content:""; position:absolute; left:0; top:0; right:0; bottom:0; border:0 solid rgba(255,255,255,.8); pointer-events:none; }
+  .cell.et::after { border-top-width:2px; } .cell.eb::after { border-bottom-width:2px; }
+  .cell.el::after { border-left-width:2px; } .cell.er::after { border-right-width:2px; }
+  .cell.act { cursor:pointer; }
+  .dot { position:absolute; left:50%; top:50%; width:26%; height:26%; transform:translate(-50%,-50%); border-radius:50%; background:rgba(255,255,255,.6); pointer-events:none; }
+  /* A player's token: their country's flag on a round white badge. --cell is set from the board width in JS. */
+  /* The picture is the flag cropped to a circle: object-fit:cover in a square scales the flag so its HEIGHT fills the circle,
+     and centres it, so the circle's diameter equals the flag's height and a wide flag loses equal slices left and right. */
+  .flagTok { position:absolute; left:6%; top:6%; right:6%; bottom:6%; border-radius:50%; z-index:1; overflow:hidden; display:flex; align-items:center; justify-content:center;
+             background:#f4f6f4; box-shadow:0 1px 3px rgba(0,0,0,.5); font-size:calc(var(--cell, 40px) * .5); line-height:1; }
+  .flagTok img, #players .sw img { width:100%; height:100%; object-fit:cover; object-position:center; display:block; }
+  .flagTok::after { content:""; position:absolute; left:0; top:0; right:0; bottom:0; border-radius:50%; box-shadow:inset 0 0 0 1.5px rgba(255,255,255,.8); pointer-events:none; }
+  .flagTok.me { box-shadow:0 0 0 2px #fff, 0 0 12px 3px rgba(255,255,255,.65); }
+  .flagTok.sel { outline:2.5px dashed var(--gold); outline-offset:2px; }
+  select { font:16px/1.2 var(--sans); width:100%; min-height:46px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
+  select:focus-visible { outline:3px solid var(--gold); outline-offset:2px; }
+  .hint { margin-top:10px; color:var(--muted); min-height:22px; }
+
+  /* ---------- side panel ---------- */
+  .side { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:0 16px; }
+  .side section { padding:16px 0; border-bottom:1px solid var(--line); display:grid; gap:12px; }
+  .side section:last-child { border-bottom:0; }
+  .head { display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .head span { color:var(--muted); font-size:13px; }
+  .stats { display:flex; gap:20px; align-items:flex-end; }
+  .stat small { display:block; color:var(--muted); font-size:12px; margin-bottom:4px; }
+  .stat b { font:700 26px/1 var(--serif); font-variant-numeric:tabular-nums; }
+  .stat b.big { font-size:44px; }
+  .pips { display:flex; gap:4px; height:26px; align-items:center; }
+  .pip { width:14px; height:20px; border-radius:3px; background:var(--danger); }
+  .pip.off { background:transparent; box-shadow:inset 0 0 0 2px var(--line); }
+  .stepper { display:flex; align-items:center; gap:6px; }
+  .stepper b { min-width:28px; text-align:center; font:700 18px/1 var(--serif); font-variant-numeric:tabular-nums; }
+  ul { list-style:none; margin:0; padding:0; display:grid; gap:2px; }
+  #players li { display:flex; align-items:center; gap:8px; padding:5px 0; }
+  #players .sw { width:24px; height:24px; border-radius:50%; overflow:hidden; flex:none; display:flex; align-items:center; justify-content:center; font-size:15px; line-height:1; background:#fff; box-shadow:inset 0 0 0 1px rgba(0,0,0,.22); }
+  #players .nm { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  #players .at { color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; }
+  #players li.out .nm { color:var(--muted); text-decoration:line-through; }
+  #log { display:grid; gap:0; max-height:260px; overflow:auto; }
+  #log div { padding:6px 0; border-top:1px solid var(--line); }
+  #log div:first-child { border-top:0; }
+  #log time { display:block; color:var(--muted); font-size:12px; }
+  .empty { color:var(--muted); font-style:italic; }
+
+  /* ---------- order slip (confirmation) ---------- */
+  #overlay { position:fixed; left:0; top:0; right:0; bottom:0; background:rgba(20,30,26,.55); display:flex; align-items:flex-end; justify-content:center; z-index:20; }
+  .sheet { background:var(--panel); width:100%; max-width:460px; border-radius:18px 18px 0 0; padding:22px 20px calc(20px + env(safe-area-inset-bottom)); display:grid; gap:14px; animation:rise .18s ease-out; }
+  @media (min-width:700px) { #overlay { align-items:center; } .sheet { border-radius:18px; } }
+  @keyframes rise { from { transform:translateY(24px); opacity:0; } to { transform:none; opacity:1; } }
+  .sheet h2 { font:700 24px/1.15 var(--serif); }
+  .sheet .body { color:var(--muted); }
+  .ledger { margin:0; display:grid; gap:0; border-top:1px solid var(--line); }
+  .ledger div { display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid var(--line); }
+  .ledger dt { color:var(--muted); } .ledger dd { margin:0; font-weight:650; font-variant-numeric:tabular-nums; }
+  .final { font-weight:600; }
+  .sheetBtns { display:grid; grid-template-columns:1fr 1.4fr; gap:10px; }
+  .go { position:relative; overflow:hidden; }
+  .go .shade { position:absolute; top:0; right:0; bottom:0; width:0; background:rgba(255,255,255,.55); }
+  .go.arming .shade { width:100%; animation:unveil .8s linear forwards; }
+  .go .lbl { position:relative; }
+  @keyframes unveil { from { width:100%; } to { width:0; } }
+  @media (prefers-reduced-motion:reduce) { .sheet { animation:none; } .go.arming .shade { animation:none; } }
+
+  #toast { position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%); background:var(--ink); color:#fff; padding:11px 16px; border-radius:10px; max-width:calc(100% - 32px); opacity:0; pointer-events:none; transition:opacity .2s; z-index:30; text-align:center; }
+  #toast.show { opacity:1; }
+</style>
+</head>
+<body>
+<header class="top">
+  <div>
+    <h1>Alliance</h1>
+    <p id="status">Connecting…</p>
+  </div>
+  <div id="whoBar" hidden>
+    <span id="whoEmail"></span>
+    <button class="btn quiet small" id="signOutBtn">Sign out</button>
+  </div>
+</header>
+
+<main id="authScreen" class="authWrap" hidden>
+  <div class="authCard">
+    <h2>Sign in to play</h2>
+    <input id="emailInput" type="email" placeholder="Email" autocomplete="username" autocapitalize="none">
+    <input id="passInput" type="password" placeholder="Password (6+ characters)" autocomplete="current-password">
+    <div class="row">
+      <button class="btn" id="signInBtn">Sign in</button>
+      <button class="btn quiet" id="signUpBtn">Create account</button>
+      <button class="btn quiet" id="resetBtn">Forgot password</button>
+    </div>
+    <div id="authMsg" class="err"></div>
+    <p>Use a password you don't use anywhere else.</p>
+  </div>
+</main>
+
+<main id="waitScreen" class="authWrap" hidden>
+  <div class="authCard">
+    <h2>Waiting for approval</h2>
+    <p>You're signed in as <b id="waitEmail"></b>, but the moderator hasn't approved this email yet. Ask them to approve it, then check again. This page also checks every 30 seconds.</p>
+    <div class="row"><button class="btn" id="retryBtn">Check again</button></div>
+  </div>
+</main>
+
+<main id="gameScreen" class="game" hidden>
+  <div>
+    <div class="boardFrame">
+      <div class="boardBox"><div class="board" id="board"></div></div>
+    </div>
+    <p class="hint" id="hint"></p>
+  </div>
+
+  <aside class="side">
+    <!-- The target panel sits first so Attack and Give appear right under the board, with no scrolling on an iPad. -->
+    <section id="targetBox" hidden>
+      <div class="head"><h2 id="tName"></h2><span>In range</span></div>
+      <button class="btn danger" id="attackBtn">Attack (1 point)</button>
+      <div class="row">
+        <div class="stepper">
+          <button class="btn quiet small" id="giveMinus" aria-label="Fewer points">−</button>
+          <b id="giveNum">1</b>
+          <button class="btn quiet small" id="givePlus" aria-label="More points">+</button>
+        </div>
+        <button class="btn quiet" id="giveBtn">Give points</button>
+      </div>
+    </section>
+
+    <section id="joinBox" hidden>
+      <h2>Join the game</h2>
+      <select id="countrySel" aria-label="Your country"></select>
+      <input id="nameInput" maxlength="20" placeholder="Your name" autocomplete="off">
+      <div class="row"><button class="btn" id="joinBtn">Join</button></div>
+      <div id="joinMsg" class="err"></div>
+    </section>
+
+    <section id="meBox" hidden>
+      <div class="head"><h2 id="meName"></h2><span>You</span></div>
+      <div class="stats">
+        <div class="stat"><small>Points</small><b class="big" id="sAp">0</b></div>
+        <div class="stat"><small>Health</small><div class="pips" id="pips"></div></div>
+        <div class="stat"><small>Range</small><b id="sRange">0</b></div>
+      </div>
+      <button class="btn quiet" id="rangeBtn">Extend range</button>
+    </section>
+
+    <section>
+      <div class="head"><h2>Players</h2><span id="tankCount"></span></div>
+      <ul id="players"></ul>
+    </section>
+
+    <section>
+      <h2>Activity</h2>
+      <div id="log"></div>
+    </section>
+  </aside>
+</main>
+
+<div id="overlay" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <h2 id="sheetTitle"></h2>
+    <p class="body" id="sheetBody"></p>
+    <dl class="ledger" id="ledger">
+      <div><dt>Cost</dt><dd id="sCost"></dd></div>
+      <div><dt>Points after</dt><dd id="sAfter"></dd></div>
+    </dl>
+    <p class="final">You can't undo this.</p>
+    <div class="sheetBtns">
+      <button class="btn quiet" id="cancelBtn">Cancel</button>
+      <button class="btn go" id="confirmBtn"><span class="shade"></span><span class="lbl" id="confirmLbl">Confirm</span></button>
+    </div>
+    <div class="err" id="sheetErr"></div>
+  </div>
+</div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
+import { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
+import { getFirestore, collection, doc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
+import { GRID, DAY, START_HP, RANGE_COST, COUNTRIES, reach, apOf, replay, check, describe, publicView } from "./engine.js?v=3";
+
+// ====== YOUR FIREBASE WEB CONFIG ======
+const firebaseConfig = {
+  apiKey: "AIzaSyBZX1mATHH3kJnUtFwt16ch62VWB7R94qE",
+  authDomain: "alliance-prototype.firebaseapp.com",
+  projectId: "alliance-prototype",
+  storageBucket: "alliance-prototype.firebasestorage.app",
+  messagingSenderId: "1060860489170",
+  appId: "1:1060860489170:web:77026c88a7dccbb07cec0b"
+};
+// ======================================
+
+const ARM_MS = 800;   // how long Confirm stays locked, so a stray double tap can't fire an order
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+const persistReady = setPersistence(auth, browserLocalPersistence).catch(() => {});
+
+const $ = (id) => document.getElementById(id);
+let uid = null, startAt = null, badStart = false, actions = [];
+let state = { players: new Map(), log: [] };
+let selected = null, giveAmt = 1;
+let pending = null, armed = false, busy = false, armTimer = null;
+let unsubs = [], listening = false, denied = false;   // denied: signed in, but the moderator hasn't approved this email
+let countrySig = "", autoName = "";
+
+// Flags are emoji built from the two-letter country code. Apple and Android devices draw them as flags;
+// Windows computers draw the two letters instead.
+const flagOf = (code) => (typeof code === "string" && code.length === 2)
+  ? String.fromCodePoint(...[...code.toUpperCase()].map((c) => 127397 + c.charCodeAt(0))) : "";
+let regionNames = null;
+try { regionNames = new Intl.DisplayNames(["en"], { type: "region" }); } catch (e) { /* older browser: show codes */ }
+const countryName = (code) => { try { return (regionNames && regionNames.of(code)) || code; } catch (e) { return code; } };
+
+// ---------- board skeleton ----------
+const cells = [];
+for (let i = 0; i < GRID * GRID; i++) {
+  const c = document.createElement("div");
+  c.className = "cell";
+  c.dataset.x = i % GRID; c.dataset.y = Math.floor(i / GRID);
+  $("board").appendChild(c); cells.push(c);
+}
+$("board").addEventListener("click", (e) => {
+  const c = e.target.closest(".cell");
+  if (c) onCell(+c.dataset.x, +c.dataset.y);
+});
+
+// ---------- helpers ----------
+const me = () => state.players.get(uid);
+const fmt = (ms) => { const m = Math.max(0, Math.ceil(ms / 60000)); return `${Math.floor(m / 60)}h ${m % 60}m`; };
+const plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
+let toastTimer = null;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 3200);
+}
+function parseStart(v) {
+  if (v && typeof v.toMillis === "function") return v.toMillis();
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") { const t = Date.parse(v.trim()); return Number.isNaN(t) ? null : t; }
+  return null;
+}
+
+// Put a country's flag picture into `host`. Tries a fixed-height image, then a fixed-width one, and
+// finally falls back to the emoji flag, so a missing image never breaks the game.
+function flagContent(code, host) {
+  const c = String(code).toLowerCase();
+  const urls = [`https://flagcdn.com/h120/${c}.png`, `https://flagcdn.com/w160/${c}.png`];
+  let i = 0;
+  const img = document.createElement("img");
+  img.alt = ""; img.decoding = "async"; img.draggable = false;
+  img.onerror = () => { i++; if (i < urls.length) img.src = urls[i]; else img.replaceWith(document.createTextNode(flagOf(code))); };
+  img.src = urls[0];
+  host.appendChild(img);
+}
+// Each player's board token and list badge are built once and reused, so images never reload or flicker.
+const tokenCache = new Map(), badgeCache = new Map();
+function tokenFor(p) {
+  let el = tokenCache.get(p.id);
+  if (!el) { el = document.createElement("div"); flagContent(p.country, el); tokenCache.set(p.id, el); }
+  el.className = "flagTok" + (p.id === uid ? " me" : "") + (p.id === selected ? " sel" : "");
+  return el;
+}
+function badgeFor(p) {
+  let el = badgeCache.get(p.id);
+  if (!el) { el = document.createElement("span"); el.className = "sw"; flagContent(p.country, el); badgeCache.set(p.id, el); }
+  return el;
+}
+
+// Fill the country list. Taken countries are greyed out. Rebuilt only when the taken set changes,
+// so a picker the player has open isn't closed by a background refresh.
+function fillCountries(taken) {
+  const sig = [...taken].sort().join(",");
+  if (sig === countrySig && $("countrySel").options.length) return;
+  countrySig = sig;
+  const sel = $("countrySel"), keep = sel.value;
+  const first = document.createElement("option"); first.value = ""; first.textContent = "Choose your country";
+  const opts = COUNTRIES.map((code) => {
+    const o = document.createElement("option");
+    o.value = code; o.disabled = taken.has(code);
+    o.textContent = `${flagOf(code)} ${countryName(code)}${taken.has(code) ? " (taken)" : ""}`;
+    return o;
+  }).sort((a, b) => a.textContent.slice(a.textContent.indexOf(" ") + 1).localeCompare(b.textContent.slice(b.textContent.indexOf(" ") + 1)));
+  sel.replaceChildren(first, ...opts);
+  sel.value = taken.has(keep) ? "" : keep;
+}
+
+// ---------- state ----------
+function recompute() {
+  actions.sort((a, b) => (a.ts - b.ts) || (a.id < b.id ? -1 : 1));
+  state = replay(actions, startAt);
+  render();
+}
+
+function render() {
+  const now = Date.now();
+  const m = me();
+  const pubs = publicView(state);            // only name, position, in-play: never hp or range of others
+  const pubById = new Map(pubs.map((p) => [p.id, p]));
+  const inPlay = pubs.filter((p) => p.alive);
+  const started = startAt != null && now >= startAt;
+  const over = started && pubs.length > 1 && inPlay.length === 1;
+  const ap = m ? apOf(m, now, startAt) : 0;
+  const canAct = !!(started && !over && m && m.alive && !busy);
+
+  // ----- header status
+  let status;
+  if (!uid) status = "Sign in to see the board and play.";
+  else if (denied) status = "Waiting for the moderator to approve your account.";
+  else if (badStart) status = "The start time in the database isn't readable. Use a format like 2026-11-20T12:00:00+02:00.";
+  else if (startAt == null) status = "Lobby. Waiting for the game to start.";
+  else if (!started) status = `Starts ${new Date(startAt).toLocaleString([], { weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit" })}. Joining is open until then.`;
+  else if (over) status = `${inPlay[0].name} wins.`;
+  else status = `Day ${Math.floor((now - startAt) / DAY) + 1}. Next point in ${fmt(startAt + (Math.floor((now - startAt) / DAY) + 1) * DAY - now)}.`;
+  $("status").textContent = status;
+
+  $("authScreen").hidden = !!uid;
+  $("waitScreen").hidden = !(uid && denied);
+  $("gameScreen").hidden = !uid || denied;
+  if (!uid || denied) return;
+
+  // ----- selection stays valid only while the target is alive and in range
+  const t = selected && pubById.get(selected);
+  const tOk = !!(t && t.alive && m && m.alive && reach(m, t, m.range));
+  if (!tOk) selected = null;
+
+  // ----- board
+  $("board").style.setProperty("--cell", (($("board").clientWidth / GRID) || 40) + "px");   // sizes the flags
+  const occ = new Map();
+  for (const p of inPlay) occ.set(`${p.x},${p.y}`, p);
+  const inRegion = (x, y) => !!(m && m.alive && reach(m, { x, y }, m.range));
+  const movable = (x, y) => canAct && ap >= 1 && Math.abs(x - m.x) + Math.abs(y - m.y) === 1 && !occ.has(`${x},${y}`);
+  for (const c of cells) {
+    const x = +c.dataset.x, y = +c.dataset.y;
+    let cls = "cell" + ((x + y) % 2 ? " alt" : "");
+    if (inRegion(x, y)) {
+      cls += " r";
+      if (y > 0 && !inRegion(x, y - 1)) cls += " et";
+      if (y < GRID - 1 && !inRegion(x, y + 1)) cls += " eb";
+      if (x > 0 && !inRegion(x - 1, y)) cls += " el";
+      if (x < GRID - 1 && !inRegion(x + 1, y)) cls += " er";
+    }
+    c.replaceChildren();
+    const p = occ.get(`${x},${y}`);
+    if (p) {
+      c.appendChild(tokenFor(p));
+      c.setAttribute("aria-label", p.id === uid ? "You" : p.name);
+      if (p.id !== uid && inRegion(x, y)) cls += " act";
+    } else {
+      c.removeAttribute("aria-label");
+      if (movable(x, y)) { cls += " act"; const d = document.createElement("i"); d.className = "dot"; c.appendChild(d); }
+    }
+    c.className = cls;
+  }
+
+  // ----- hint under the board
+  let hint = "Tap a player in range to target them, or a dotted square to move.";
+  if (!m) hint = started ? "The game has started, so you can watch but not join." : "Join to get a starting square.";
+  else if (!m.alive) hint = "You're out. You can keep watching.";
+  else if (over) hint = "The game is over.";
+  else if (!started) hint = "Orders unlock when the game starts.";
+  else if (ap < 1) hint = `You have no points. Next one in ${fmt(startAt + (Math.floor((now - startAt) / DAY) + 1) * DAY - now)}.`;
+  $("hint").textContent = hint;
+
+  // ----- join box
+  $("joinBox").hidden = !!m || started;
+  if (!$("joinBox").hidden) fillCountries(new Set(pubs.map((p) => p.country)));
+
+  // ----- my tank
+  $("meBox").hidden = !m;
+  if (m) {
+    $("meName").textContent = m.name;
+    $("sAp").textContent = ap;
+    $("sRange").textContent = m.range;
+    $("pips").replaceChildren(...Array.from({ length: Math.max(START_HP, m.hp) }, (_, i) => {
+      const s = document.createElement("span"); s.className = "pip" + (i < m.hp ? "" : " off"); return s;
+    }));
+    $("rangeBtn").textContent = `Extend range to ${m.range + 1} (${plural(RANGE_COST, "point")})`;
+    $("rangeBtn").disabled = !(canAct && ap >= RANGE_COST);
+  }
+
+  // ----- target
+  $("targetBox").hidden = !tOk;
+  if (tOk) {
+    giveAmt = Math.min(Math.max(1, giveAmt), Math.max(1, ap));
+    $("tName").textContent = t.name;
+    $("attackBtn").disabled = !(canAct && ap >= 1);
+    $("giveNum").textContent = giveAmt;
+    $("giveMinus").disabled = giveAmt <= 1;
+    $("givePlus").disabled = giveAmt >= ap;
+    $("giveBtn").textContent = `Give ${plural(giveAmt, "point")}`;
+    $("giveBtn").disabled = !(canAct && ap >= giveAmt);
+  }
+
+  // ----- tanks list
+  $("tankCount").textContent = `${inPlay.length} in play`;
+  const order = pubs.slice().sort((a, b) =>
+    (a.id === uid ? -1 : b.id === uid ? 1 : 0) || (b.alive - a.alive) || a.name.localeCompare(b.name));
+  $("players").replaceChildren(...order.map((p) => {
+    const li = document.createElement("li"); if (!p.alive) li.className = "out";
+    const sw = badgeFor(p);
+    const nm = document.createElement("span"); nm.className = "nm"; nm.textContent = p.name + (p.id === uid ? " (you)" : "");
+    const at = document.createElement("span"); at.className = "at"; at.textContent = p.alive ? "" : "out";
+    li.append(sw, nm, at); return li;
+  }));
+
+  // ----- activity (each event is described for this viewer only)
+  const items = state.log.map((e) => ({ e, text: describe(e, uid) })).filter((x) => x.text).slice(-40).reverse();
+  $("log").replaceChildren(...(items.length ? items.map(({ e, text }) => {
+    const d = document.createElement("div");
+    const tm = document.createElement("time");
+    tm.textContent = new Date(e.t).toLocaleString([], { weekday: "short", hour: "2-digit", minute: "2-digit" });
+    d.append(tm, text); return d;
+  }) : [Object.assign(document.createElement("p"), { className: "empty", textContent: "Nothing yet." })]));
+}
+
+// ---------- taking actions: every action goes through the order slip ----------
+function ask(o) {
+  if (pending || busy) return;
+  const err = check(actions, startAt, { uid, ...o.payload, ts: Date.now() });
+  if (err) { toast(err); return; }
+  const m = me();
+  pending = o; armed = false; busy = false;
+  $("sheetTitle").textContent = o.title;
+  $("sheetBody").textContent = o.body;
+  $("ledger").hidden = o.cost == null;
+  if (o.cost != null) {
+    const ap = apOf(m, Date.now(), startAt);
+    $("sCost").textContent = plural(o.cost, "point");
+    $("sAfter").textContent = ap - o.cost;
+  }
+  $("sheetErr").textContent = "";
+  $("confirmBtn").className = "btn go arming" + (o.danger ? " danger" : "");
+  $("overlay").hidden = false;
+  renderSheet();
+  $("cancelBtn").focus();
+  clearTimeout(armTimer);
+  armTimer = setTimeout(() => { armed = true; $("confirmBtn").classList.remove("arming"); renderSheet(); }, ARM_MS);
+}
+function renderSheet() {
+  if (!pending) return;
+  $("confirmBtn").disabled = !armed || busy;
+  $("cancelBtn").disabled = busy;
+  $("confirmLbl").textContent = busy ? "Sending…" : pending.confirm;
+}
+function closeSheet() {
+  clearTimeout(armTimer);
+  pending = null; armed = false; busy = false;
+  $("overlay").hidden = true;
+  render();
+}
+async function submit() {
+  if (!pending || !armed || busy) return;
+  const o = pending;
+  busy = true; renderSheet();
+  const err = check(actions, startAt, { uid, ...o.payload, ts: Date.now() });
+  if (err) { busy = false; $("sheetErr").textContent = err; renderSheet(); return; }
+  try {
+    await addDoc(collection(db, "actions"), { uid, ...o.payload, ts: serverTimestamp() });
+    const done = o.done; closeSheet(); toast(done);
+  } catch (e) {
+    busy = false;
+    $("sheetErr").textContent = e.code === "permission-denied"
+      ? "The database refused this action. Check that the rules are published."
+      : e.message;
+    renderSheet();
+  }
+}
+$("confirmBtn").onclick = submit;
+$("cancelBtn").onclick = () => { if (!busy) closeSheet(); };
+$("overlay").addEventListener("click", (e) => { if (e.target === $("overlay") && !busy) closeSheet(); });
+
+function proposeMove(dx, dy) {
+  const m = me(); if (!m) return;
+  const dir = dx === 1 ? "right" : dx === -1 ? "left" : dy === 1 ? "down" : "up";
+  ask({ payload: { type: "move", dx, dy }, title: `Move ${dir}`, body: `You move one square ${dir}.`, cost: 1, confirm: "Move", done: `Moved ${dir}.` });
+}
+function onCell(x, y) {
+  if (busy || pending) return;
+  const m = me(); if (!m || !m.alive) return;
+  const hit = publicView(state).find((p) => p.alive && p.x === x && p.y === y);
+  if (hit) {
+    if (hit.id === uid) return;
+    if (reach(m, hit, m.range)) { selected = selected === hit.id ? null : hit.id; render(); }
+    else toast("Out of range.");
+    return;
+  }
+  if (Math.abs(x - m.x) + Math.abs(y - m.y) === 1) proposeMove(x - m.x, y - m.y);
+}
+
+$("attackBtn").onclick = () => {
+  const t = publicView(state).find((p) => p.id === selected); if (!t) return;
+  ask({ payload: { type: "attack", target: t.id }, title: `Attack ${t.name}`, body: `${t.name} loses 1 HP.`, cost: 1, confirm: "Fire", danger: true, done: `You hit ${t.name}.` });
+};
+$("giveBtn").onclick = () => {
+  const t = publicView(state).find((p) => p.id === selected); if (!t) return;
+  ask({ payload: { type: "give", target: t.id, amount: giveAmt }, title: `Give ${plural(giveAmt, "point")} to ${t.name}`, body: `${t.name} gets ${giveAmt}, and you lose ${giveAmt}. Gifts can't be taken back.`, cost: giveAmt, confirm: "Give", done: `Gave ${plural(giveAmt, "point")} to ${t.name}.` });
+};
+$("rangeBtn").onclick = () => {
+  const m = me(); if (!m) return;
+  ask({ payload: { type: "range" }, title: `Extend range to ${m.range + 1}`, body: `Your range grows from ${m.range} to ${m.range + 1} squares.`, cost: RANGE_COST, confirm: "Extend", done: `Range is now ${m.range + 1}.` });
+};
+// Picking a country suggests its name as your player name, unless you've typed your own.
+$("countrySel").onchange = () => {
+  const code = $("countrySel").value, input = $("nameInput");
+  if (code && (input.value.trim() === "" || input.value === autoName)) { autoName = countryName(code).slice(0, 20); input.value = autoName; }
+};
+$("joinBtn").onclick = () => {
+  const name = $("nameInput").value.trim(), country = $("countrySel").value;
+  $("joinMsg").textContent = "";
+  if (!country) { $("joinMsg").textContent = "Choose a country."; return; }
+  const err = check(actions, startAt, { uid, type: "join", name, country, ts: Date.now() });
+  if (err) { $("joinMsg").textContent = err; return; }
+  ask({ payload: { type: "join", name, country }, title: `Join as ${flagOf(country)} ${name}`, body: "Other players will see your name and flag. You get a random starting square, and you can't change any of this afterwards.", cost: null, confirm: "Join game", done: "You're in." });
+};
+addEventListener("resize", () => render());
+$("giveMinus").onclick = () => { giveAmt = Math.max(1, giveAmt - 1); render(); };
+$("givePlus").onclick = () => { giveAmt += 1; render(); };
+
+const keyMoves = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && pending && !busy) { closeSheet(); return; }
+  if (!keyMoves[e.key] || pending || busy || e.target.tagName === "INPUT") return;
+  const m = me(); if (!m || !m.alive || $("gameScreen").hidden) return;
+  e.preventDefault();
+  proposeMove(...keyMoves[e.key]);
+});
+
+// ---------- accounts ----------
+const AUTH_ERRORS = {
+  "auth/invalid-credential": "Wrong email or password.",
+  "auth/invalid-email": "That email address doesn't look right.",
+  "auth/missing-email": "Enter your email address.",
+  "auth/missing-password": "Enter a password.",
+  "auth/email-already-in-use": "That email already has an account. Try Sign in.",
+  "auth/weak-password": "Password must be at least 6 characters.",
+  "auth/too-many-requests": "Too many attempts. Wait a few minutes and try again.",
+  "auth/network-request-failed": "Network problem. Check your connection.",
+  "auth/operation-not-allowed": "Email/password sign-in isn't enabled in the Firebase console yet.",
+};
+function authMsg(text, ok) { $("authMsg").textContent = text; $("authMsg").className = ok ? "err okmsg" : "err"; }
+async function doAuth(fn, okText) {
+  authMsg("", true);
+  try { await persistReady; await fn($("emailInput").value.trim(), $("passInput").value); if (okText) authMsg(okText, true); }
+  catch (e) { authMsg(AUTH_ERRORS[e.code] || e.message, false); }
+}
+$("signInBtn").onclick = () => doAuth((e, p) => signInWithEmailAndPassword(auth, e, p));
+$("signUpBtn").onclick = () => doAuth((e, p) => createUserWithEmailAndPassword(auth, e, p));
+$("resetBtn").onclick = () => doAuth((e) => sendPasswordResetEmail(auth, e), "If that email has an account, a reset link is on its way. Check spam too.");
+$("signOutBtn").onclick = () => signOut(auth);
+
+// ---------- live data (only while signed in; the database rules require it) ----------
+function listen() {
+  if (listening) return; listening = true;
+  const fail = (e) => {
+    if (e.code === "permission-denied") { denied = true; render(); }
+    else $("status").textContent = "Connection problem: " + e.message;
+  };
+  unsubs.push(onSnapshot(doc(db, "game", "main"), (s) => {
+    const v = s.exists() ? s.data().startAt : undefined;
+    startAt = parseStart(v);
+    badStart = v !== undefined && v !== null && startAt === null;
+    recompute();
+  }, fail));
+  unsubs.push(onSnapshot(query(collection(db, "actions"), orderBy("ts")), (s) => {
+    actions = s.docs.map((d) => {
+      const v = d.data({ serverTimestamps: "estimate" });
+      return { ...v, id: d.id, ts: v.ts.toMillis() };
+    });
+    recompute();
+  }, fail));
+}
+function stopListening() {
+  unsubs.forEach((u) => u()); unsubs = []; listening = false;
+  actions = []; startAt = null; selected = null; state = { players: new Map(), log: [] };
+  tokenCache.clear(); badgeCache.clear();
+}
+function retry() {            // ask the database again, e.g. after the moderator approves this email
+  denied = false; stopListening();
+  if (uid) listen();
+  render();
+}
+$("retryBtn").onclick = retry;
+
+onAuthStateChanged(auth, (user) => {
+  uid = user ? user.uid : null;
+  denied = false;
+  $("whoBar").hidden = !user;
+  if (user) { $("whoEmail").textContent = user.email; $("waitEmail").textContent = user.email; $("passInput").value = ""; stopListening(); listen(); }
+  else { if (pending) closeSheet(); stopListening(); }
+  render();
+});
+setInterval(() => { if (denied) retry(); else render(); }, 30000);   // refresh countdown and daily points; recheck approval
+render();
+</script>
+</body>
+</html>
