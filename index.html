@@ -77,6 +77,9 @@
   select { font:16px/1.2 var(--sans); width:100%; min-height:46px; padding:0 12px; border:1px solid var(--line); border-radius:10px; background:#fff; color:var(--ink); }
   select:focus-visible { outline:3px solid var(--gold); outline-offset:2px; }
   .hint { margin-top:10px; color:var(--muted); min-height:22px; }
+  #playBar { margin-top:10px; display:flex; align-items:center; gap:10px; min-height:46px; }
+  #playBar .msg { flex:1; font-weight:600; }
+  #playBar .cnt { color:var(--muted); font-size:13px; font-variant-numeric:tabular-nums; white-space:nowrap; }
 
   /* ---------- side panel ---------- */
   .side { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:0 16px; }
@@ -169,6 +172,7 @@
       <div class="boardBox"><div class="board" id="board"></div></div>
     </div>
     <p class="hint" id="hint"></p>
+    <div id="playBar" hidden><span class="msg" id="playMsg" aria-live="polite"></span><span class="cnt" id="playCount"></span><button class="btn quiet" id="skipBtn" type="button">Skip</button></div>
   </div>
 
   <aside class="side">
@@ -238,7 +242,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js";
 import { getAuth, onAuthStateChanged, setPersistence, browserLocalPersistence, createUserWithEmailAndPassword, signInWithEmailAndPassword, sendPasswordResetEmail, signOut } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import { getFirestore, collection, doc, onSnapshot, query, orderBy, addDoc, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
-import { GRID, DAY, START_HP, RANGE_COST, COUNTRIES, reach, apOf, replay, check, describe, publicView } from "./engine.js?v=3";
+import { GRID, DAY, START_HP, RANGE_COST, COUNTRIES, reach, apOf, step, replay, check, describe, publicView } from "./engine.js?v=3";
 
 // ====== YOUR FIREBASE WEB CONFIG ======
 const firebaseConfig = {
@@ -265,6 +269,10 @@ let selected = null, giveAmt = 1;
 let pending = null, armed = false, busy = false, armTimer = null;
 let unsubs = [], listening = false, denied = false;   // denied: signed in, but the moderator hasn't approved this email
 let countrySig = "", autoName = "";
+// Catching up on what happened (see "catching up" below)
+let timeline = { states: [{ players: new Map(), logLen: 0 }], vis: [], log: [] };
+let shownCount = 0, shownLastId, actionsLoaded = false, epoch = 0;
+let playing = false, skipFlag = false, animLock = false, dirty = false, curAnim = null, wake = null;
 
 // Flags are emoji built from the two-letter country code. Apple and Android devices draw them as flags;
 // Windows computers draw the two letters instead.
@@ -350,13 +358,146 @@ function fillCountries(taken) {
 }
 
 // ---------- state ----------
+// `state` is what the board shows. Normally that is the full game. While catching up it is the game as it was
+// after the last action already shown, so the board plays forward one event at a time.
 function recompute() {
   actions.sort((a, b) => (a.ts - b.ts) || (a.id < b.id ? -1 : 1));
-  state = replay(actions, startAt);
+  timeline = buildTimeline(actions, startAt, uid);
+  if (!actionsLoaded) { state = { players: new Map(), log: [] }; render(); return; }
+  if (shownLastId === undefined) {            // first look on this device: remember it, or resume where this device left off
+    const seen = readSeen();
+    shownLastId = seen === null ? (actions.length ? actions[actions.length - 1].id : null) : (seen || null);
+  }
+  let n = shownLastId == null ? 0 : actions.findIndex((a) => a.id === shownLastId) + 1;
+  if (shownLastId != null && n === 0) n = actions.length;   // that action is gone (game reset): start from now
+  setShown(n);
   render();
+  pump();
+}
+
+// ---------- catching up: show what happened since this device last looked ----------
+// Moves, eliminations and hits on or by you are played one at a time, slowly, in the order they happened.
+// Hits between other players are private, so they are never shown. While it plays, orders are locked (Skip jumps to now).
+const REDUCED = !!(window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches);
+const MOVE_MS = 1000, OUT_MS = 1800, HIT_MS = 1000, GAP_MS = 700;
+const seenKey = () => `alliance.seen.${firebaseConfig.projectId}.${uid}`;
+function readSeen() { try { return localStorage.getItem(seenKey()); } catch (e) { return null; } }
+
+// Replay once, keeping a snapshot after every action and noting which actions are worth showing.
+function buildTimeline(list, sAt, viewer) {
+  const st = { players: new Map(), log: [] };
+  const snap = () => ({ players: new Map([...st.players].map(([k, p]) => [k, { ...p }])), logLen: st.log.length });
+  const states = [snap()], vis = [];
+  for (const a of list) {
+    const before = st.log.length;
+    const err = step(st, a, sAt);
+    let v = null;
+    if (!err) {
+      const fresh = st.log.slice(before);
+      const out = fresh.find((e) => e.k === "out");
+      const hit = fresh.find((e) => e.k === "hit" && (e.by === viewer || e.to === viewer));
+      if (out) v = { k: "out", uid: out.to, e: out };
+      else if (hit) v = { k: "hit", uid: hit.to, e: hit };
+      else if (a.type === "move") v = { k: "move", uid: a.uid };
+    }
+    vis.push(v);
+    states.push(snap());
+  }
+  return { states, vis, log: st.log };
+}
+
+function setShown(n) {
+  n = Math.max(0, Math.min(n, actions.length));
+  shownCount = n;
+  shownLastId = n > 0 ? actions[n - 1].id : null;
+  if (uid) { try { localStorage.setItem(seenKey(), shownLastId ?? ""); } catch (e) { /* private mode: fine */ } }
+  const s = timeline.states[n];
+  state = { players: s.players, log: timeline.log.slice(0, s.logLen) };
+}
+
+const wait = (ms) => new Promise((res) => {
+  if (skipFlag) return res();
+  const t = setTimeout(() => { wake = null; res(); }, ms);
+  wake = () => { clearTimeout(t); wake = null; res(); };
+});
+function play(el, frames, ms) {
+  return new Promise((res) => {
+    if (skipFlag || !el || !el.isConnected) return res(null);
+    const a = el.animate(frames, { duration: ms, easing: "ease-in-out", fill: "forwards" });
+    curAnim = a; a.onfinish = a.oncancel = () => { curAnim = null; res(a); };
+  });
+}
+function skipPlayback() { skipFlag = true; if (wake) wake(); if (curAnim) curAnim.cancel(); }
+$("skipBtn").onclick = skipPlayback;
+
+const GLOW = "0 0 0 3px #fff, 0 0 14px 4px rgba(255,255,255,.85)";
+const RED = "0 0 0 4px #c4402b, 0 0 16px 6px rgba(196,64,43,.9)";
+async function playStep(j, v) {
+  const el = tokenCache.get(v.uid);
+  const after = timeline.states[j + 1];
+  if (v.k === "move") {
+    const nm = v.uid === uid ? "You" : (after.players.get(v.uid)?.name ?? "Someone");
+    $("playMsg").textContent = `${nm} moved.`;
+    const r0 = el && el.isConnected ? el.getBoundingClientRect() : null;
+    setShown(j + 1); render();                           // the token now sits on its new square
+    const r1 = el && el.isConnected ? el.getBoundingClientRect() : null;
+    if (r0 && r1) {                                       // slide it from the old square to the new one
+      animLock = true;
+      const a = await play(el, [
+        { transform: `translate(${r0.left - r1.left}px, ${r0.top - r1.top}px)`, boxShadow: GLOW, zIndex: 5 },
+        { transform: "none", boxShadow: GLOW, zIndex: 5 }], MOVE_MS);
+      if (a) a.cancel();
+      animLock = false; if (dirty) { dirty = false; render(); }
+    }
+  } else if (v.k === "hit") {
+    $("playMsg").textContent = describe(v.e, uid);
+    const mine = v.e.to === uid;                          // red shake if you were hit, gold pulse on the one you hit
+    const c = mine ? RED : "0 0 0 4px #f0c24b, 0 0 16px 6px rgba(240,194,75,.9)";
+    animLock = true;
+    const a = await play(el, mine
+      ? [{ transform: "translateX(0)", boxShadow: c }, { transform: "translateX(-5px)", offset: .2 }, { transform: "translateX(5px)", offset: .4 }, { transform: "translateX(-5px)", offset: .6 }, { transform: "translateX(0)", boxShadow: c }]
+      : [{ boxShadow: "0 0 0 0 rgba(240,194,75,0)" }, { boxShadow: c, offset: .4 }, { boxShadow: "0 0 0 0 rgba(240,194,75,0)" }], HIT_MS);
+    animLock = false; setShown(j + 1); render(); if (a) a.cancel(); dirty = false;
+  } else {                                                // out
+    $("playMsg").textContent = describe(v.e, uid);
+    animLock = true;
+    const a = await play(el, [
+      { transform: "translateX(0) scale(1)", opacity: 1, boxShadow: RED },
+      { transform: "translateX(-5px) scale(1)", offset: .08 }, { transform: "translateX(5px) scale(1)", offset: .16 },
+      { transform: "translateX(-5px) scale(1)", offset: .24 }, { transform: "translateX(5px) scale(1)", offset: .32 },
+      { transform: "translateX(0) scale(1)", opacity: 1, offset: .5 },
+      { transform: "translateX(0) scale(.2)", opacity: 0, boxShadow: RED }], OUT_MS);
+    animLock = false; setShown(j + 1); render(); if (a) a.cancel(); dirty = false;   // render takes the token off the board
+  }
+  await wait(GAP_MS);
+}
+
+async function pump() {
+  if (playing || pending || !actionsLoaded) return;
+  const myEpoch = epoch;
+  const nextVis = () => { for (let j = shownCount; j < timeline.vis.length; j++) if (timeline.vis[j]) return j; return -1; };
+  if (REDUCED || nextVis() < 0) { if (shownCount !== actions.length) { setShown(actions.length); render(); } return; }
+  playing = true; skipFlag = false;
+  let done = 0;
+  try {
+    for (;;) {
+      const j = nextVis();
+      if (j < 0 || skipFlag || myEpoch !== epoch) break;
+      setShown(j);                                        // the board as it was just before this event
+      const left = timeline.vis.slice(j).filter(Boolean).length;
+      $("playCount").textContent = `${done + 1} of ${done + left}`;
+      render();
+      await playStep(j, timeline.vis[j]);
+      if (myEpoch !== epoch) return;
+      done++;
+    }
+  } finally { if (myEpoch === epoch) playing = false; }
+  if (myEpoch !== epoch) return;
+  setShown(actions.length); render();
 }
 
 function render() {
+  if (animLock) { dirty = true; return; }   // never rebuild the board in the middle of an animation
   const now = Date.now();
   const m = me();
   const pubs = publicView(state);            // only name, position, in-play: never hp or range of others
@@ -365,7 +506,7 @@ function render() {
   const started = startAt != null && now >= startAt;
   const over = started && pubs.length > 1 && inPlay.length === 1;
   const ap = m ? apOf(m, now, startAt) : 0;
-  const canAct = !!(started && !over && m && m.alive && !busy);
+  const canAct = !!(started && !over && m && m.alive && !busy && !playing);
 
   // ----- header status
   let status;
@@ -418,6 +559,7 @@ function render() {
   else if (!started) hint = "Orders unlock when the game starts.";
   else if (ap < 1) hint = `You have no points. Next one in ${fmt(startAt + (Math.floor((now - startAt) / DAY) + 1) * DAY - now)}.`;
   $("hint").textContent = hint;
+  $("hint").hidden = playing; $("playBar").hidden = !playing;
 
   // ----- join box
   $("joinBox").hidden = !!m || started;
@@ -473,7 +615,7 @@ function render() {
 
 // ---------- taking actions: every action goes through the order slip ----------
 function ask(o) {
-  if (pending || busy) return;
+  if (pending || busy || playing) return;
   const err = check(actions, startAt, { uid, ...o.payload, ts: Date.now() });
   if (err) { toast(err); return; }
   const m = me();
@@ -505,6 +647,7 @@ function closeSheet() {
   pending = null; armed = false; busy = false;
   $("overlay").hidden = true;
   render();
+  pump();
 }
 async function submit() {
   if (!pending || !armed || busy) return;
@@ -533,7 +676,7 @@ function proposeMove(dx, dy) {
   ask({ payload: { type: "move", dx, dy }, title: `Move ${dir}`, body: `You move one square ${dir}.`, cost: 1, confirm: "Move", done: `Moved ${dir}.` });
 }
 function onCell(x, y) {
-  if (busy || pending) return;
+  if (busy || pending || playing) return;
   const m = me(); if (!m || !m.alive) return;
   const hit = publicView(state).find((p) => p.alive && p.x === x && p.y === y);
   if (hit) {
@@ -577,7 +720,7 @@ $("givePlus").onclick = () => { giveAmt += 1; render(); };
 const keyMoves = { ArrowUp: [0, -1], ArrowDown: [0, 1], ArrowLeft: [-1, 0], ArrowRight: [1, 0] };
 addEventListener("keydown", (e) => {
   if (e.key === "Escape" && pending && !busy) { closeSheet(); return; }
-  if (!keyMoves[e.key] || pending || busy || e.target.tagName === "INPUT") return;
+  if (!keyMoves[e.key] || pending || busy || playing || e.target.tagName === "INPUT") return;
   const m = me(); if (!m || !m.alive || $("gameScreen").hidden) return;
   e.preventDefault();
   proposeMove(...keyMoves[e.key]);
@@ -620,6 +763,7 @@ function listen() {
     recompute();
   }, fail));
   unsubs.push(onSnapshot(query(collection(db, "actions"), orderBy("ts")), (s) => {
+    actionsLoaded = true;
     actions = s.docs.map((d) => {
       const v = d.data({ serverTimestamps: "estimate" });
       return { ...v, id: d.id, ts: v.ts.toMillis() };
@@ -629,7 +773,10 @@ function listen() {
 }
 function stopListening() {
   unsubs.forEach((u) => u()); unsubs = []; listening = false;
+  epoch++; skipPlayback(); playing = false; animLock = false; dirty = false;
   actions = []; startAt = null; selected = null; state = { players: new Map(), log: [] };
+  actionsLoaded = false; shownLastId = undefined; shownCount = 0;
+  timeline = { states: [{ players: new Map(), logLen: 0 }], vis: [], log: [] };
   tokenCache.clear(); badgeCache.clear();
 }
 function retry() {            // ask the database again, e.g. after the moderator approves this email
